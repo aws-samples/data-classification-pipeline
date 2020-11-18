@@ -56,7 +56,7 @@ Macie is now enabled and has begun to collect information about the S3 buckets i
 
 ```
 git clone https://github.com/aws-samples/data-classification-pipeline.git
-cd data-classification-pipeline/start-glue-job
+cd data-classification-pipeline/create-glue-script
 npm install
 cd ../
 aws s3 mb s3://<SAM_BUCKET_NAME>
