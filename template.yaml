@@ -512,7 +512,7 @@ Resources:
     Properties: 
         EndpointType: target
         EngineName: s3
-        ExtraConnectionAttributes: "addColumnName:true"
+        ExtraConnectionAttributes: "addColumnName=true;compressionType=GZIP;dataFormat=parquet;"
         S3Settings: 
             BucketName: !Ref MacieLandingBucket
             ServiceAccessRoleArn: !GetAtt DMSAccessRole.Arn
