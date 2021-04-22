@@ -681,7 +681,6 @@ Resources:
     Properties:
       Role: !GetAtt GlueJobRole.Arn
       Description: Data Classification Pipeline Input Table Crawler
-      SchemaChangePolicy: ''
       DatabaseName: !Ref GlueDatabase
       Targets:
         S3Targets:
@@ -689,7 +688,7 @@ Resources:
       Name: dcp-glue-landing-crawler
       SchemaChangePolicy:
         UpdateBehavior: "UPDATE_IN_DATABASE"
-        DeleteBehavior: "LOG"
+        DeleteBehavior: "DEPRECATE_IN_DATABASE"
       Configuration: "{\"Version\":1.0,\"Grouping\":{\"TableGroupingPolicy\":\"CombineCompatibleSchemas\"},\"CrawlerOutput\":{\"Partitions\":{\"AddOrUpdateBehavior\":\"InheritFromTable\"},\"Tables\":{\"AddOrUpdateBehavior\":\"MergeNewColumns\"}}}"
 
   GlueOutputTableCrawler:
@@ -725,7 +724,7 @@ Resources:
         "--enable-continuous-cloudwatch-log": "true"
         "--enable-metrics": "true"
         "--enable-spark-ui": "true"
-        "--job-bookmark-option": "job-bookmark-enable"
+        "--job-bookmark-option": "job-bookmark-disable"
         "--job-language": "python"
         "--spark-event-logs-path": !Sub "s3://${GlueAssetsBucket}/sparkHistoryLogs/"
       WorkerType: 'G.1X'
