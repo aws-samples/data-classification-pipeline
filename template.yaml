@@ -357,6 +357,10 @@ Resources:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Sub '${Prefix}-glue-landing-${AWS::Region}-${AWS::AccountId}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
       NotificationConfiguration:
         LambdaConfigurations:
           - Event: 's3:ObjectCreated:*'
@@ -368,6 +372,10 @@ Resources:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Sub '${Prefix}-glue-curated-${AWS::Region}-${AWS::AccountId}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
 
   GlueAssetsBucket:
     Type: AWS::S3::Bucket
