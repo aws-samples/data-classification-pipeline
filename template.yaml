@@ -609,7 +609,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties: 
       FunctionName: !Sub '${Prefix}-start-glue-workflow'
-      CodeUri: start-glue-job/
+      CodeUri: start-glue-workflow/
       Description: Data Classification Pipeline - Start Glue Workflow
       Role: !GetAtt StartGlueWorkflowLambdaRole.Arn
       Environment:
@@ -761,7 +761,7 @@ Resources:
         "--enable-continuous-cloudwatch-log": "true"
         "--enable-metrics": "true"
         "--enable-spark-ui": "true"
-        "--job-bookmark-option": "job-bookmark-disable"
+        "--job-bookmark-option": "job-bookmark-enable"
         "--job-language": "python"
         "--spark-event-logs-path": !Sub "s3://${GlueAssetsBucket}/sparkHistoryLogs/"
       WorkerType: 'G.1X'
