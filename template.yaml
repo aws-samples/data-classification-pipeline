@@ -364,9 +364,9 @@ Resources:
       NotificationConfiguration:
         LambdaConfigurations:
           - Event: 's3:ObjectCreated:*'
-            Function: !GetAtt StartGlueJobLambdaFunction.Arn
+            Function: !GetAtt StartGlueWorkflowLambdaFunction.Arn
     DependsOn:
-      - StartGlueJobLambdaFunctionPermission
+      - StartGlueWorkflowLambdaFunctionPermission
 
   GlueCuratedBucket:
     Type: AWS::S3::Bucket
@@ -605,23 +605,23 @@ Resources:
 #   | |__| (_| | | | | | | |_) | (_| | (_| |
 #   |_____\__,_|_| |_| |_|_.__/ \__,_|\__,_|
 #                                           
-  StartGlueJobLambdaFunction:
+  StartGlueWorkflowLambdaFunction:
     Type: AWS::Serverless::Function
     Properties: 
       FunctionName: !Sub '${Prefix}-start-glue-workflow'
       CodeUri: start-glue-job/
       Description: Data Classification Pipeline - Start Glue Workflow
-      Role: !GetAtt StartGlueJobLambdaRole.Arn
+      Role: !GetAtt StartGlueWorkflowLambdaRole.Arn
       Environment:
         Variables:
           #JOB_NAME: 'data-classification-pipeline' # Note: Always refer to GlueJob.Name, it's hard coded to avoid circular dependency
           WORKFLOW_NAME: !Ref GlueWorkflow
           
-  StartGlueJobLambdaFunctionPermission:
+  StartGlueWorkflowLambdaFunctionPermission:
     Type: AWS::Lambda::Permission
     Properties:
       Action: lambda:InvokeFunction
-      FunctionName: !Ref StartGlueJobLambdaFunction
+      FunctionName: !Ref StartGlueWorkflowLambdaFunction
       Principal: s3.amazonaws.com
       SourceAccount: !Ref AWS::AccountId
       SourceArn: !Sub 'arn:aws:s3:::${Prefix}-glue-landing-${AWS::Region}-${AWS::AccountId}'
@@ -892,10 +892,10 @@ Resources:
                   - !Sub ${GlueCuratedBucket.Arn}/*
                   - !Sub ${GlueAssetsBucket.Arn}/*
 
-  StartGlueJobLambdaRole:
+  StartGlueWorkflowLambdaRole:
     Type: AWS::IAM::Role
     Properties: 
-      RoleName: DataClassificationPipelineStartGlueJobLambdaRole
+      RoleName: DataClassificationPipelineStartGlueWorkflowLambdaRole
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -906,7 +906,7 @@ Resources:
       ManagedPolicyArns: 
         - 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
       Policies:
-        - PolicyName: StartGlueJob
+        - PolicyName: StartGlueWorkflow
           PolicyDocument:
             Version: 2012-10-17
             Statement:
@@ -930,7 +930,7 @@ Resources:
       ManagedPolicyArns: 
         - 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
       Policies:
-        - PolicyName: StartGlueJob
+        - PolicyName: S3PutObject
           PolicyDocument:
             Version: 2012-10-17
             Statement:
