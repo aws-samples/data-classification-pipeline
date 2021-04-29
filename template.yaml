@@ -44,7 +44,7 @@ Parameters:
       Must begin with a letter and must not end with a hyphen or contain two
       consecutive hyphens.
   DBInstanceClass:
-    Default: db.m5.large
+    Default: db.t3.small
     Description: DB instance class
     Type: String
     ConstraintDescription: Must select a valid DB instance type.
@@ -357,17 +357,25 @@ Resources:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Sub '${Prefix}-glue-landing-${AWS::Region}-${AWS::AccountId}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
       NotificationConfiguration:
         LambdaConfigurations:
           - Event: 's3:ObjectCreated:*'
-            Function: !GetAtt StartGlueJobLambdaFunction.Arn
+            Function: !GetAtt StartGlueWorkflowLambdaFunction.Arn
     DependsOn:
-      - StartGlueJobLambdaFunctionPermission
+      - StartGlueWorkflowLambdaFunctionPermission
 
   GlueCuratedBucket:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Sub '${Prefix}-glue-curated-${AWS::Region}-${AWS::AccountId}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
 
   GlueAssetsBucket:
     Type: AWS::S3::Bucket
@@ -428,6 +436,9 @@ Resources:
       DBSubnetGroupName: !Ref DBSubnetGroup
       VPCSecurityGroups:
         - !Ref RDSSG
+      StorageType: gp2
+      StorageEncrypted: true
+
 
   DBSubnetGroup:
     Type: 'AWS::RDS::DBSubnetGroup'
@@ -448,7 +459,7 @@ Resources:
     DependsOn: MySQLDB
     Properties: 
       ImageId: ami-032930428bf1abbff
-      InstanceType: t2.micro
+      InstanceType: t3.micro
       SubnetId: !Ref PublicSubnet0
       SecurityGroupIds:
         - !Ref RDSSG
@@ -458,10 +469,11 @@ Resources:
             #!/bin/bash
             sudo yum install -y mysql
             cd /tmp
+            wget https://s3.amazonaws.com/rds-downloads/rds-ca-2019-root.pem
             wget https://downloads.mysql.com/docs/sakila-db.tar.gz
             tar -zxvf sakila-db.tar.gz
-            mysql -u ${DBUser} -p${DBPassword} -h ${MySQLDB.Endpoint.Address} -P ${MySQLDB.Endpoint.Port} < sakila-db/sakila-schema.sql
-            mysql -u ${DBUser} -p${DBPassword} -h ${MySQLDB.Endpoint.Address} -P ${MySQLDB.Endpoint.Port} < sakila-db/sakila-data.sql
+            mysql -u ${DBUser} -p${DBPassword} -h ${MySQLDB.Endpoint.Address} -P ${MySQLDB.Endpoint.Port} --ssl-ca=rds-ca-2019-root.pem --ssl-mode=REQUIRED  < sakila-db/sakila-schema.sql
+            mysql -u ${DBUser} -p${DBPassword} -h ${MySQLDB.Endpoint.Address} -P ${MySQLDB.Endpoint.Port} --ssl-ca=rds-ca-2019-root.pem --ssl-mode=REQUIRED  < sakila-db/sakila-data.sql
             sudo shutdown -h now            
       Tags:
         - Key: Name
@@ -495,7 +507,37 @@ Resources:
       SubnetIds: 
         - !Ref PublicSubnet0
         - !Ref PublicSubnet1
-        
+
+  RDSCA2019RootDMSCertificate:
+    Type: AWS::DMS::Certificate
+    Properties:
+      CertificateIdentifier: rds-ca-2019-root
+      CertificatePem: |-
+        -----BEGIN CERTIFICATE-----
+        MIIEBjCCAu6gAwIBAgIJAMc0ZzaSUK51MA0GCSqGSIb3DQEBCwUAMIGPMQswCQYD
+        VQQGEwJVUzEQMA4GA1UEBwwHU2VhdHRsZTETMBEGA1UECAwKV2FzaGluZ3RvbjEi
+        MCAGA1UECgwZQW1hem9uIFdlYiBTZXJ2aWNlcywgSW5jLjETMBEGA1UECwwKQW1h
+        em9uIFJEUzEgMB4GA1UEAwwXQW1hem9uIFJEUyBSb290IDIwMTkgQ0EwHhcNMTkw
+        ODIyMTcwODUwWhcNMjQwODIyMTcwODUwWjCBjzELMAkGA1UEBhMCVVMxEDAOBgNV
+        BAcMB1NlYXR0bGUxEzARBgNVBAgMCldhc2hpbmd0b24xIjAgBgNVBAoMGUFtYXpv
+        biBXZWIgU2VydmljZXMsIEluYy4xEzARBgNVBAsMCkFtYXpvbiBSRFMxIDAeBgNV
+        BAMMF0FtYXpvbiBSRFMgUm9vdCAyMDE5IENBMIIBIjANBgkqhkiG9w0BAQEFAAOC
+        AQ8AMIIBCgKCAQEArXnF/E6/Qh+ku3hQTSKPMhQQlCpoWvnIthzX6MK3p5a0eXKZ
+        oWIjYcNNG6UwJjp4fUXl6glp53Jobn+tWNX88dNH2n8DVbppSwScVE2LpuL+94vY
+        0EYE/XxN7svKea8YvlrqkUBKyxLxTjh+U/KrGOaHxz9v0l6ZNlDbuaZw3qIWdD/I
+        6aNbGeRUVtpM6P+bWIoxVl/caQylQS6CEYUk+CpVyJSkopwJlzXT07tMoDL5WgX9
+        O08KVgDNz9qP/IGtAcRduRcNioH3E9v981QO1zt/Gpb2f8NqAjUUCUZzOnij6mx9
+        McZ+9cWX88CRzR0vQODWuZscgI08NvM69Fn2SQIDAQABo2MwYTAOBgNVHQ8BAf8E
+        BAMCAQYwDwYDVR0TAQH/BAUwAwEB/zAdBgNVHQ4EFgQUc19g2LzLA5j0Kxc0LjZa
+        pmD/vB8wHwYDVR0jBBgwFoAUc19g2LzLA5j0Kxc0LjZapmD/vB8wDQYJKoZIhvcN
+        AQELBQADggEBAHAG7WTmyjzPRIM85rVj+fWHsLIvqpw6DObIjMWokpliCeMINZFV
+        ynfgBKsf1ExwbvJNzYFXW6dihnguDG9VMPpi2up/ctQTN8tm9nDKOy08uNZoofMc
+        NUZxKCEkVKZv+IL4oHoeayt8egtv3ujJM6V14AstMQ6SwvwvA93EP/Ug2e4WAXHu
+        cbI1NAbUgVDqp+DRdfvZkgYKryjTWd/0+1fS8X1bBZVWzl7eirNVnHbSH2ZDpNuY
+        0SBd8dj5F6ld3t58ydZbrTHze7JJOd8ijySAp4/kiu9UfZWuTPABzDa/DSdz9Dk/
+        zPW4CXXvhLmE02TA9/HeCw3KEHIwicNuEfw=
+        -----END CERTIFICATE-----
+
   DBEndpoint:
     Type: "AWS::DMS::Endpoint"
     Properties: 
@@ -506,13 +548,16 @@ Resources:
       Port: !GetAtt MySQLDB.Endpoint.Port
       ServerName: !GetAtt MySQLDB.Endpoint.Address
       Username: !Ref DBUser
+      SslMode: verify-ca
+      CertificateArn: !Ref RDSCA2019RootDMSCertificate
+        
       
   S3Endpoint:
     Type: AWS::DMS::Endpoint
     Properties: 
         EndpointType: target
         EngineName: s3
-        ExtraConnectionAttributes: "addColumnName:true"
+        ExtraConnectionAttributes: "addColumnName=true;compressionType=GZIP;dataFormat=parquet;"
         S3Settings: 
             BucketName: !Ref MacieLandingBucket
             ServiceAccessRoleArn: !GetAtt DMSAccessRole.Arn
@@ -560,23 +605,23 @@ Resources:
 #   | |__| (_| | | | | | | |_) | (_| | (_| |
 #   |_____\__,_|_| |_| |_|_.__/ \__,_|\__,_|
 #                                           
-  StartGlueJobLambdaFunction:
+  StartGlueWorkflowLambdaFunction:
     Type: AWS::Serverless::Function
     Properties: 
       FunctionName: !Sub '${Prefix}-start-glue-workflow'
-      CodeUri: start-glue-job/
+      CodeUri: start-glue-workflow/
       Description: Data Classification Pipeline - Start Glue Workflow
-      Role: !GetAtt StartGlueJobLambdaRole.Arn
+      Role: !GetAtt StartGlueWorkflowLambdaRole.Arn
       Environment:
         Variables:
           #JOB_NAME: 'data-classification-pipeline' # Note: Always refer to GlueJob.Name, it's hard coded to avoid circular dependency
           WORKFLOW_NAME: !Ref GlueWorkflow
           
-  StartGlueJobLambdaFunctionPermission:
+  StartGlueWorkflowLambdaFunctionPermission:
     Type: AWS::Lambda::Permission
     Properties:
       Action: lambda:InvokeFunction
-      FunctionName: !Ref StartGlueJobLambdaFunction
+      FunctionName: !Ref StartGlueWorkflowLambdaFunction
       Principal: s3.amazonaws.com
       SourceAccount: !Ref AWS::AccountId
       SourceArn: !Sub 'arn:aws:s3:::${Prefix}-glue-landing-${AWS::Region}-${AWS::AccountId}'
@@ -673,7 +718,6 @@ Resources:
     Properties:
       Role: !GetAtt GlueJobRole.Arn
       Description: Data Classification Pipeline Input Table Crawler
-      SchemaChangePolicy: ''
       DatabaseName: !Ref GlueDatabase
       Targets:
         S3Targets:
@@ -681,7 +725,7 @@ Resources:
       Name: dcp-glue-landing-crawler
       SchemaChangePolicy:
         UpdateBehavior: "UPDATE_IN_DATABASE"
-        DeleteBehavior: "LOG"
+        DeleteBehavior: "DEPRECATE_IN_DATABASE"
       Configuration: "{\"Version\":1.0,\"Grouping\":{\"TableGroupingPolicy\":\"CombineCompatibleSchemas\"},\"CrawlerOutput\":{\"Partitions\":{\"AddOrUpdateBehavior\":\"InheritFromTable\"},\"Tables\":{\"AddOrUpdateBehavior\":\"MergeNewColumns\"}}}"
 
   GlueOutputTableCrawler:
@@ -848,10 +892,10 @@ Resources:
                   - !Sub ${GlueCuratedBucket.Arn}/*
                   - !Sub ${GlueAssetsBucket.Arn}/*
 
-  StartGlueJobLambdaRole:
+  StartGlueWorkflowLambdaRole:
     Type: AWS::IAM::Role
     Properties: 
-      RoleName: DataClassificationPipelineStartGlueJobLambdaRole
+      RoleName: DataClassificationPipelineStartGlueWorkflowLambdaRole
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -862,7 +906,7 @@ Resources:
       ManagedPolicyArns: 
         - 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
       Policies:
-        - PolicyName: StartGlueJob
+        - PolicyName: StartGlueWorkflow
           PolicyDocument:
             Version: 2012-10-17
             Statement:
@@ -886,7 +930,7 @@ Resources:
       ManagedPolicyArns: 
         - 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
       Policies:
-        - PolicyName: StartGlueJob
+        - PolicyName: S3PutObject
           PolicyDocument:
             Version: 2012-10-17
             Statement:
