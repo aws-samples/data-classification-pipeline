@@ -489,7 +489,7 @@ Resources:
     DependsOn: DMSReplicationSubnetGroup
     Type: "AWS::DMS::ReplicationInstance"
     Properties: 
-      ReplicationInstanceClass: dms.t3.small
+      ReplicationInstanceClass: dms.t2.small
       PubliclyAccessible: false 
       AvailabilityZone: !GetAtt PublicSubnet0.AvailabilityZone
       ReplicationSubnetGroupIdentifier: !Ref DMSReplicationSubnetGroup
