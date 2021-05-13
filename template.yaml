@@ -9,6 +9,13 @@ Globals:
     MemorySize: 128
 
 Parameters:
+  CreateRDSServiceRole:
+    Description: Define if the RDS Service Role must be created
+    Type: String
+    AllowedValues:
+      - true
+      - false
+    Default: false
   Prefix:
     Description: Naming Prefix
     Type: String
@@ -75,6 +82,13 @@ Parameters:
     Default: sakila
     Description: DB Name
     Type: String
+
+
+Conditions:
+  CreateRDSServiceRole: !Equals
+    - !Ref CreateRDSServiceRole
+    - 'true'
+ 
 
 Resources:
 #   __     ______   ____ 
@@ -827,6 +841,13 @@ Resources:
 #    | | / ___ \| |  | |
 #   |___/_/   \_\_|  |_|
 #                       
+  RDSServiceRole:
+    Type: "AWS::IAM::ServiceLinkedRole"
+    Condition: CreateRDSServiceRole
+    Properties:
+      AWSServiceName: "rds.amazonaws.com"
+      Description: Allows Amazon RDS to manage AWS resources on your behalf
+
   DMSAccessRole:
     Type: "AWS::IAM::Role"
     Properties:
