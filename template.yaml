@@ -827,7 +827,7 @@ Resources:
 #    | | / ___ \| |  | |
 #   |___/_/   \_\_|  |_|
 #                       
-  DMSAccessRole: 
+  DMSAccessRole:
     Type: "AWS::IAM::Role"
     Properties:
       RoleName: 'dms-vpc-role'
@@ -943,6 +943,7 @@ Resources:
   DeliveryRole:
     Type: AWS::IAM::Role
     Properties:
+      RoleName: 'DataClassificationPipelineKinesisRole'
       AssumeRolePolicyDocument:
         Version: 2012-10-17
         Statement:
@@ -978,6 +979,7 @@ Resources:
   EventDeliveryRole:
     Type: AWS::IAM::Role
     Properties:
+      RoleName: 'DataClassificationPipelineCloudWatchRole'
       AssumeRolePolicyDocument:
         Version: 2012-10-17
         Statement:
