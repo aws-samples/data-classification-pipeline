@@ -19,6 +19,7 @@
 				"cloudformation:*Stack*",
 				"cloudformation:*ChangeSet*",
 				"cloudformation:*Template*",
+				"cloudformation:CreateUploadBucket",
 				"dms:*Endpoint*",
 				"dms:*ReplicationInstance*",
 				"dms:*ReplicationSubnetGroup*",
