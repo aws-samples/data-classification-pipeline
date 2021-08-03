@@ -1,0 +1,1133 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: RDS Data Classification Pipeline
+
+Parameters:
+  CreateRDSServiceRole:
+    Description: Define if the RDS Service Role must be created
+    Type: String
+    AllowedValues:
+      - true
+      - false
+    Default: false
+  Prefix:
+    Description: Naming Prefix
+    Type: String
+    Default: dcp
+  VPCCIDR:
+    Description: VPC0
+    Type: String
+    Default: 10.0.0.0/16
+  PublicSubnet0CIDR:
+    Description: Public Subnet 0
+    Type: String
+    Default: 10.0.0.0/24
+  PublicSubnet1CIDR:
+    Description: Public Subnet 0
+    Type: String
+    Default: 10.0.1.0/24
+  PrivateSubnet0CIDR:
+    Description: Private Subnet 0
+    Type: String
+    Default: 10.0.2.0/24
+  PrivateSubnet1CIDR:
+    Description: Private Subnet 1
+    Type: String
+    Default: 10.0.3.0/24
+  DBInstanceID:
+    Default: mydbinstance
+    Description: My database instance
+    Type: String
+    MinLength: '1'
+    MaxLength: '63'
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+    ConstraintDescription: >-
+      Must begin with a letter and must not end with a hyphen or contain two
+      consecutive hyphens.
+  DBInstanceClass:
+    Default: db.t3.small
+    Description: DB instance class
+    Type: String
+    ConstraintDescription: Must select a valid DB instance type.
+  DBAllocatedStorage:
+    Default: '20'
+    Description: The size of the database (GiB)
+    Type: Number
+    MinValue: '5'
+    MaxValue: '1024'
+    ConstraintDescription: must be between 20 and 65536 GiB.
+  DBUser:
+    Description: MySQL User
+    Default: admin
+    Type: String
+    MinLength: '4'
+    MaxLength: '20'
+    AllowedPattern: '[a-zA-Z0-9]*'
+    ConstraintDescription: must contain only alphanumeric characters.
+  DBPassword:
+    NoEcho: 'true'
+    Description: MySQL Password
+    Type: String
+    MinLength: '8'
+    MaxLength: '41'
+    AllowedPattern: '[a-zA-Z0-9]*'
+    ConstraintDescription: must contain only alphanumeric characters.
+  DBName:
+    Default: sakila
+    Description: DB Name
+    Type: String
+  LatestAmzn2AmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+
+Conditions:
+  CreateRDSServiceRole: !Equals
+    - !Ref CreateRDSServiceRole
+    - 'true'
+
+
+Resources:
+#   __     ______   ____
+#   \ \   / /  _ \ / ___|
+#    \ \ / /| |_) | |
+#     \ V / |  __/| |___
+#      \_/  |_|    \____|
+#
+  VPC:
+    Type: 'AWS::EC2::VPC'
+    Properties:
+      CidrBlock: !Ref VPCCIDR
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${Prefix}-vpc'
+
+  InternetGateway:
+    Type: 'AWS::EC2::InternetGateway'
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub '${Prefix}-igw'
+
+  InternetGatewayAttachment:
+    Type: 'AWS::EC2::VPCGatewayAttachment'
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
+
+  PublicSubnet0:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select
+        - 0
+        - Fn::GetAZs: !Ref 'AWS::Region'
+      CidrBlock: !Ref PublicSubnet0CIDR
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${Prefix}-public_subnet0'
+
+  PublicSubnet1:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select
+        - 1
+        - Fn::GetAZs: !Ref 'AWS::Region'
+      CidrBlock: !Ref PublicSubnet1CIDR
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${Prefix}-public_subnet1'
+
+  PrivateSubnet0:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select
+        - 0
+        - Fn::GetAZs: !Ref 'AWS::Region'
+      CidrBlock: !Ref PrivateSubnet0CIDR
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub '${Prefix}-private_subnet0'
+
+  PrivateSubnet1:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select
+        - 1
+        - Fn::GetAZs: !Ref 'AWS::Region'
+      CidrBlock: !Ref PrivateSubnet1CIDR
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub '${Prefix}-private_subnet1'
+
+  PublicRouteTable:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${Prefix}-public_rt'
+
+  PrivateRouteTable:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${Prefix}-private_rt'
+
+  PublicDefaultRoute:
+    Type: 'AWS::EC2::Route'
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnet0RouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet0
+
+  PublicSubnet1RouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet1
+
+  PrivateSubnet0RouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref PrivateSubnet0
+
+  PrivateSubnet1RouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref PrivateSubnet1
+
+  DMSSG:
+    Type: 'AWS::EC2::SecurityGroup'
+    DependsOn:
+      - PrivateSubnet0
+      - PrivateSubnet1
+    Properties:
+      VpcId: !Ref VPC
+      GroupDescription: DMS security group
+
+  RDSSG:
+    Type: 'AWS::EC2::SecurityGroup'
+    DependsOn:
+      - PrivateSubnet0
+      - PrivateSubnet1
+    Properties:
+      VpcId: !Ref VPC
+      GroupDescription: RDS security group
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          CidrIp: !Ref VPCCIDR
+
+#    _  ____  __ ____
+#   | |/ /  \/  / ___|
+#   | ' /| |\/| \___ \
+#   | . \| |  | |___) |
+#   |_|\_\_|  |_|____/
+#
+  # MacieCuratedKey:
+  #   Type: 'AWS::KMS::Key'
+  #   Properties:
+  #     Description: Key for Macie Curated bucket
+  #     KeyPolicy:
+  #       Version: 2012-10-17
+  #       Id: key-default-1
+  #       Statement:
+  #         - Sid: Enable IAM User Permissions
+  #           Effect: Allow
+  #           Principal:
+  #             AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+  #           Action: 'kms:*'
+  #           Resource: '*'
+  #         - Sid: Allow Macie Principal to use the key
+  #           Effect: Allow
+  #           Principal:
+  #             Service: macie.amazonaws.com
+  #           Action:
+  #             - 'kms:Encrypt'
+  #             - 'kms:GenerateDataKey'
+  #           Resource: '*'
+  #         - Sid: Allow S3 Principal to use the key
+  #           Effect: Allow
+  #           Principal:
+  #             Service: s3.amazonaws.com
+  #           Action:
+  #             - 'kms:Decrypt'
+  #           Resource: '*'
+  #
+  # MacieCuratedKeyAlias:
+  #   Type: 'AWS::KMS::Alias'
+  #   Properties:
+  #     AliasName: !Sub 'alias/${AWS::StackName}-macie-curated-bucket-encryption-key'
+  #     TargetKeyId:
+  #       Ref: MacieCuratedKey
+
+  ConfidentialKey:
+    DependsOn: MacieSession
+    Type: 'AWS::KMS::Key'
+    Properties:
+      Description: Key for confidential bucket
+      Tags:
+        - Key: Classification
+          Value: Confidential
+      KeyPolicy:
+        Version: 2012-10-17
+        Id: key-default-2
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+          - Sid: Allow Macie Service Role to use the key
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:role/aws-service-role/macie.amazonaws.com/AWSServiceRoleForAmazonMacie'
+            Action:
+              - 'kms:DescribeKey'
+              - 'kms:Encrypt'
+              - 'kms:Decrypt'
+              - 'kms:ReEncrypt*'
+              - 'kms:GenerateDataKey'
+            Resource: '*'
+
+  ConfidentialKeyAlias:
+    Type: 'AWS::KMS::Alias'
+    Properties:
+      AliasName: !Sub 'alias/${AWS::StackName}-confidential-bucket-encryption-key'
+      TargetKeyId:
+        Ref: ConfidentialKey
+
+#    ____ _____
+#   / ___|___ /
+#   \___ \ |_ \
+#    ___) |__) |
+#   |____/____/
+#
+  MacieBucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: !Sub '${Prefix}-macie-${AWS::Region}-${AWS::AccountId}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  # MacieCuratedBucket:
+  #   DependsOn: MacieCuratedKey
+  #   Type: 'AWS::S3::Bucket'
+  #   Properties:
+  #     BucketName: !Sub '${Prefix}-macie-curated-${AWS::Region}-${AWS::AccountId}'
+  #     BucketEncryption:
+  #       ServerSideEncryptionConfiguration:
+  #         - ServerSideEncryptionByDefault:
+  #             SSEAlgorithm: 'aws:kms'
+  #             KMSMasterKeyID: !GetAtt MacieCuratedKey.Arn
+  #
+  # MacieCuratedBucketPolicy:
+  #   Type: 'AWS::S3::BucketPolicy'
+  #   Properties:
+  #     Bucket: !Ref MacieCuratedBucket
+  #     PolicyDocument:
+  #       Statement:
+  #         - Action:
+  #             - 's3:GetBucketLocation'
+  #           Effect: Allow
+  #           Principal:
+  #             Service: macie.amazonaws.com
+  #           Resource: !GetAtt MacieCuratedBucket.Arn
+  #         - Action:
+  #             - 's3:PutObject'
+  #           Effect: Allow
+  #           Principal:
+  #             Service: macie.amazonaws.com
+  #           Resource: !Sub '${MacieCuratedBucket.Arn}/*'
+  #         - Action:
+  #             - 's3:*'
+  #           Effect: Deny
+  #           Principal: '*'
+  #           Resource: !Sub '${MacieCuratedBucket.Arn}/*'
+  #           Condition:
+  #             Bool:
+  #               'aws:SecureTransport': 'false'
+
+  GlueBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${Prefix}-glue-${AWS::Region}-${AWS::AccountId}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: 's3:ObjectCreated:*'
+            Function: !GetAtt StartGlueWorkflowLambdaFunction.Arn
+    DependsOn:
+      - StartGlueWorkflowLambdaFunctionPermission
+
+  AthenaBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${Prefix}-athena-${AWS::Region}-${AWS::AccountId}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  AssetsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${Prefix}-assets-${AWS::Region}-${AWS::AccountId}'
+
+  MacieFindingsDeliveryStream:
+    DependsOn:
+      - DeliveryPolicy
+    Type: AWS::KinesisFirehose::DeliveryStream
+    Properties:
+      ExtendedS3DestinationConfiguration:
+        BucketARN: !Sub 'arn:aws:s3:::${GlueBucket}'
+        BufferingHints:
+          IntervalInSeconds: '60'
+          SizeInMBs: '1'
+        CompressionFormat: UNCOMPRESSED
+        Prefix: ''
+        RoleARN: !GetAtt DeliveryRole.Arn
+
+  MacieFindingsEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: 'All Findings from Amazon Macie'
+      EventPattern:
+        source:
+          - "aws.macie"
+        detail-type:
+          - "Macie Finding"
+      State: "ENABLED"
+      Name: MacieFindinfs2Firehose
+      Targets:
+      - Arn: !GetAtt
+          - MacieFindingsDeliveryStream
+          - Arn
+        Id: MacieFindingsEventRule
+        RoleArn: !GetAtt
+          - EventDeliveryRole
+          - Arn
+
+#    ____  ____  ____
+#   |  _ \|  _ \/ ___|
+#   | |_) | | | \___ \
+#   |  _ <| |_| |___) |
+#   |_| \_\____/|____/
+#
+  MySQLDB:
+    Type: 'AWS::RDS::DBInstance'
+    Properties:
+      DBInstanceIdentifier: !Ref DBInstanceID
+      DBName: !Ref DBName
+      DBInstanceClass: !Ref DBInstanceClass
+      AllocatedStorage: !Ref DBAllocatedStorage
+      Engine: MySQL
+      EngineVersion: 8.0.16
+      MasterUsername: !Ref DBUser
+      MasterUserPassword: !Ref DBPassword
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VPCSecurityGroups:
+        - !Ref RDSSG
+      StorageType: gp2
+      StorageEncrypted: true
+      DBParameterGroupName: !Ref MySQLDBParameterGroup
+
+  DBSubnetGroup:
+    Type: 'AWS::RDS::DBSubnetGroup'
+    Properties:
+      DBSubnetGroupDescription: DBSubnetGroup for RDS Instance
+      SubnetIds:
+        - !Ref PrivateSubnet0
+        - !Ref PrivateSubnet1
+
+  # avoids issues with log_bin_trust https://aws.amazon.com/premiumsupport/knowledge-center/rds-mysql-functions/
+  MySQLDBParameterGroup:
+    Type: 'AWS::RDS::DBParameterGroup'
+    Properties:
+      Description: DCP Parameter Group
+      Family: mysql8.0
+      Parameters:
+        log_bin_trust_function_creators: 1
+
+#    _____ ____ ____
+#   | ____/ ___|___ \
+#   |  _|| |     __) |
+#   | |__| |___ / __/
+#   |_____\____|_____|
+#
+  RDSLoaderInstance:
+    Type: AWS::EC2::Instance
+    DependsOn: MySQLDB
+    Properties:
+      ImageId: !Ref LatestAmzn2AmiId
+      InstanceType: t3.micro
+      SubnetId: !Ref PublicSubnet0
+      SecurityGroupIds:
+        - !Ref RDSSG
+      UserData:
+        Fn::Base64:
+          !Sub |
+            #!/bin/bash
+            yum install -y mysql
+            cd /tmp
+            wget https://s3.amazonaws.com/rds-downloads/rds-ca-2019-root.pem
+            wget https://downloads.mysql.com/docs/sakila-db.tar.gz
+            tar -zxvf sakila-db.tar.gz
+            mysql -u ${DBUser} -p${DBPassword} -h ${MySQLDB.Endpoint.Address} -P ${MySQLDB.Endpoint.Port} --ssl-ca=rds-ca-2019-root.pem --ssl < sakila-db/sakila-schema.sql
+            mysql -u ${DBUser} -p${DBPassword} -h ${MySQLDB.Endpoint.Address} -P ${MySQLDB.Endpoint.Port} --ssl-ca=rds-ca-2019-root.pem --ssl < sakila-db/sakila-data.sql
+            sudo shutdown -h now
+      Tags:
+        - Key: Name
+          Value: !Sub '${Prefix}-RDS-Loader'
+
+#    ____  __  __ ____
+#   |  _ \|  \/  / ___|
+#   | | | | |\/| \___ \
+#   | |_| | |  | |___) |
+#   |____/|_|  |_|____/
+#
+  DMSReplicationInstance:
+    DependsOn: DMSReplicationSubnetGroup
+    Type: "AWS::DMS::ReplicationInstance"
+    Properties:
+      ReplicationInstanceClass: dms.t2.small
+      PubliclyAccessible: false
+      AvailabilityZone: !GetAtt PublicSubnet0.AvailabilityZone
+      ReplicationSubnetGroupIdentifier: !Ref DMSReplicationSubnetGroup
+      VpcSecurityGroupIds:
+        - !Ref DMSSG
+
+  DMSReplicationSubnetGroup:
+    DependsOn:
+      - PublicSubnet0
+      - PublicSubnet1
+    Type: "AWS::DMS::ReplicationSubnetGroup"
+    Properties:
+      ReplicationSubnetGroupDescription: DMS Subnet Group
+      ReplicationSubnetGroupIdentifier: dmssubnetgroup-demo
+      SubnetIds:
+        - !Ref PublicSubnet0
+        - !Ref PublicSubnet1
+
+  RDSCA2019RootDMSCertificate:
+    Type: AWS::DMS::Certificate
+    Properties:
+      CertificateIdentifier: rds-ca-2019-root
+      CertificatePem: |-
+        -----BEGIN CERTIFICATE-----
+        MIIEBjCCAu6gAwIBAgIJAMc0ZzaSUK51MA0GCSqGSIb3DQEBCwUAMIGPMQswCQYD
+        VQQGEwJVUzEQMA4GA1UEBwwHU2VhdHRsZTETMBEGA1UECAwKV2FzaGluZ3RvbjEi
+        MCAGA1UECgwZQW1hem9uIFdlYiBTZXJ2aWNlcywgSW5jLjETMBEGA1UECwwKQW1h
+        em9uIFJEUzEgMB4GA1UEAwwXQW1hem9uIFJEUyBSb290IDIwMTkgQ0EwHhcNMTkw
+        ODIyMTcwODUwWhcNMjQwODIyMTcwODUwWjCBjzELMAkGA1UEBhMCVVMxEDAOBgNV
+        BAcMB1NlYXR0bGUxEzARBgNVBAgMCldhc2hpbmd0b24xIjAgBgNVBAoMGUFtYXpv
+        biBXZWIgU2VydmljZXMsIEluYy4xEzARBgNVBAsMCkFtYXpvbiBSRFMxIDAeBgNV
+        BAMMF0FtYXpvbiBSRFMgUm9vdCAyMDE5IENBMIIBIjANBgkqhkiG9w0BAQEFAAOC
+        AQ8AMIIBCgKCAQEArXnF/E6/Qh+ku3hQTSKPMhQQlCpoWvnIthzX6MK3p5a0eXKZ
+        oWIjYcNNG6UwJjp4fUXl6glp53Jobn+tWNX88dNH2n8DVbppSwScVE2LpuL+94vY
+        0EYE/XxN7svKea8YvlrqkUBKyxLxTjh+U/KrGOaHxz9v0l6ZNlDbuaZw3qIWdD/I
+        6aNbGeRUVtpM6P+bWIoxVl/caQylQS6CEYUk+CpVyJSkopwJlzXT07tMoDL5WgX9
+        O08KVgDNz9qP/IGtAcRduRcNioH3E9v981QO1zt/Gpb2f8NqAjUUCUZzOnij6mx9
+        McZ+9cWX88CRzR0vQODWuZscgI08NvM69Fn2SQIDAQABo2MwYTAOBgNVHQ8BAf8E
+        BAMCAQYwDwYDVR0TAQH/BAUwAwEB/zAdBgNVHQ4EFgQUc19g2LzLA5j0Kxc0LjZa
+        pmD/vB8wHwYDVR0jBBgwFoAUc19g2LzLA5j0Kxc0LjZapmD/vB8wDQYJKoZIhvcN
+        AQELBQADggEBAHAG7WTmyjzPRIM85rVj+fWHsLIvqpw6DObIjMWokpliCeMINZFV
+        ynfgBKsf1ExwbvJNzYFXW6dihnguDG9VMPpi2up/ctQTN8tm9nDKOy08uNZoofMc
+        NUZxKCEkVKZv+IL4oHoeayt8egtv3ujJM6V14AstMQ6SwvwvA93EP/Ug2e4WAXHu
+        cbI1NAbUgVDqp+DRdfvZkgYKryjTWd/0+1fS8X1bBZVWzl7eirNVnHbSH2ZDpNuY
+        0SBd8dj5F6ld3t58ydZbrTHze7JJOd8ijySAp4/kiu9UfZWuTPABzDa/DSdz9Dk/
+        zPW4CXXvhLmE02TA9/HeCw3KEHIwicNuEfw=
+        -----END CERTIFICATE-----
+
+  DBEndpoint:
+    Type: "AWS::DMS::Endpoint"
+    Properties:
+      DatabaseName: !Ref DBName
+      EndpointType: source
+      EngineName: mysql
+      Password: !Ref DBPassword
+      Port: !GetAtt MySQLDB.Endpoint.Port
+      ServerName: !GetAtt MySQLDB.Endpoint.Address
+      Username: !Ref DBUser
+      SslMode: verify-ca
+      CertificateArn: !Ref RDSCA2019RootDMSCertificate
+
+
+  S3Endpoint:
+    Type: AWS::DMS::Endpoint
+    Properties:
+        EndpointType: target
+        EngineName: s3
+        ExtraConnectionAttributes: "addColumnName=true;compressionType=GZIP;dataFormat=parquet;"
+        S3Settings:
+            BucketName: !Ref MacieBucket
+            ServiceAccessRoleArn: !GetAtt DMSAccessRole.Arn
+
+  RDSToS3Task:
+    Type: 'AWS::DMS::ReplicationTask'
+    Properties:
+      MigrationType: full-load
+      ReplicationInstanceArn: !Ref DMSReplicationInstance
+      SourceEndpointArn: !Ref DBEndpoint
+      TargetEndpointArn: !Ref S3Endpoint
+      ReplicationTaskSettings: |
+        {
+          "TargetMetadata": {
+            "SupportLobs": true
+          },
+          "FullLoadSettings": {
+            "TargetTablePrepMode": "DROP_AND_CREATE"
+          },
+          "Logging": {
+            "EnableLogging": true
+          }
+        }
+      TableMappings: !Sub |
+        {
+          "rules": [
+            {
+              "rule-type": "selection",
+              "rule-id": "1",
+              "rule-name": "1",
+              "object-locator": {
+                "schema-name": "${DBName}",
+                "table-name": "%"
+              },
+              "rule-action": "include",
+              "filters": []
+            }
+            ]
+        }
+
+
+#    _                    _         _
+#   | |    __ _ _ __ ___ | |__   __| | __ _
+#   | |   / _` | '_ ` _ \| '_ \ / _` |/ _` |
+#   | |__| (_| | | | | | | |_) | (_| | (_| |
+#   |_____\__,_|_| |_| |_|_.__/ \__,_|\__,_|
+#
+  StartGlueWorkflowLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: nodejs12.x
+      Handler: index.handler
+      MemorySize: 256
+      FunctionName: !Sub '${Prefix}-start-glue-workflow'
+      Description: Data Classification Pipeline - Start Glue Workflow
+      Role: !GetAtt StartGlueWorkflowLambdaRole.Arn
+      Environment:
+        Variables:
+          #JOB_NAME: 'data-classification-pipeline' # Note: Always refer to GlueJob.Name, it's hard coded to avoid circular dependency
+          WORKFLOW_NAME: !Ref GlueWorkflow
+      Code:
+        ZipFile: |
+          const AWS = require('aws-sdk');
+          var glue = new AWS.Glue();
+
+          const WORKFLOW_NAME = process.env.WORKFLOW_NAME;
+
+          exports.handler = async(event) => {
+              let s3 = event.Records[0].s3;
+              console.log(`Starting DCP Glue Workflow for s3://${s3.bucket.name}/${s3.object.key}`);
+
+              return await glue.startWorkflowRun({ Name: WORKFLOW_NAME }).promise();
+          };
+
+  StartGlueWorkflowLambdaFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref StartGlueWorkflowLambdaFunction
+      Principal: s3.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
+      SourceArn: !Sub 'arn:aws:s3:::${Prefix}-glue-${AWS::Region}-${AWS::AccountId}'
+
+  CreateGlueScriptCustomResource:
+    Type: Custom::CustomResource
+    Properties:
+      ServiceToken: !GetAtt CreateGlueScriptLambdaFunction.Arn
+
+  CreateGlueScriptLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: nodejs12.x
+      Handler: index.handler
+      MemorySize: 256
+      FunctionName: !Sub '${Prefix}-create-upload-glue-script'
+      Description: Data Classification Pipeline - Upload Glue script into S3
+      Role: !GetAtt CreateGlueScriptLambdaRole.Arn
+      Environment:
+        Variables:
+          ASSETS_BUCKET: !Ref AssetsBucket
+          ATHENA_BUCKET: !Ref AthenaBucket
+          ACCOUNT_ID: !Ref AWS::AccountId
+          SCRIPT_URL: https://raw.githubusercontent.com/aws-samples/data-classification-pipeline/main/assets/dcp-glue-script.py
+      Code:
+        ZipFile: |
+          const https = require('https');
+          const url = require('url');
+
+          const AWS = require('aws-sdk');
+          const s3 = new AWS.S3();
+
+          const FUNCTION_TIMEOUT = 10 * 1000;
+          const ATHENA_BUCKET = process.env.ATHENA_BUCKET;
+          const ASSETS_BUCKET = process.env.ASSETS_BUCKET;
+          const ACCOUNT_ID = process.env.ACCOUNT_ID;
+          const SCRIPT_URL = process.env.SCRIPT_URL;
+          const SCRIPT_KEY = 'scripts/dcp-script.py';
+          const AWS_REGION = process.env.AWS_REGION.replace(/-/g, '_');
+
+          exports.handler = async(event, context) => {
+              logRequest(event, context);
+              try {
+                  setTimeoutWatchDog(event, context);
+
+                  let script = await downloadGlueScript();
+                  script = script.replace(/ATHENA_BUCKET/g, `${ATHENA_BUCKET}`);
+                  script = script.replace(/AWS_REGION/g, `${AWS_REGION}`);
+                  script = script.replace(/ACCOUNT_ID/g, `${ACCOUNT_ID}`);
+                  let params = { Key: SCRIPT_KEY, Bucket: ASSETS_BUCKET, Body: script };
+
+                  if (event.RequestType == 'Create' || event.RequestType == 'Update') {
+                      console.log('Creating Glue script.');
+                      await s3.putObject(params).promise();
+                  }
+
+                  await sendCloudFormationResponse(event, context, "SUCCESS");
+              } catch (err) {
+                  await sendCloudFormationResponse(event, context, "FAILED", err);
+              }
+          };
+
+          function logRequest(event, context) {
+              console.log(`"${event.StackId}" "${event.RequestId}" "${context.logStreamName}" "${event.LogicalResourceId}" "${event.ResponseURL}"`);
+          }
+
+          function setTimeoutWatchDog(event, context) {
+              const timeoutHandler = async() => {
+                  await sendCloudFormationResponse(event, context, "FAILED", { 'error': 'Resource timeout' });
+              };
+
+              setTimeout(timeoutHandler, FUNCTION_TIMEOUT);
+          }
+
+          async function downloadGlueScript() {
+            return new Promise((resolve, reject) => {
+              https.get(SCRIPT_URL, (response) => {
+                let data = '';
+                response.on('data', (chunk) => data += chunk);
+                response.on('error', (err) => reject(err));
+                response.on('end', () => resolve(data));
+              }).on('error', reject);
+            });
+          }
+
+          async function sendCloudFormationResponse(event, context, responseStatus, responseData, physicalResourceId, noEcho) {
+            return new Promise((resolve, reject) => {
+                let responseBody = JSON.stringify({
+                    Status: responseStatus,
+                    Reason: "See the details in CloudWatch Log Stream: " + context.logStreamName,
+                    PhysicalResourceId: physicalResourceId || context.logStreamName,
+                    StackId: event.StackId,
+                    RequestId: event.RequestId,
+                    LogicalResourceId: event.LogicalResourceId,
+                    NoEcho: noEcho || false,
+                    Data: responseData
+                });
+
+                console.log("CFN Payload:\n", responseBody);
+
+                let parsedUrl = url.parse(event.ResponseURL);
+                let options = {
+                    hostname: parsedUrl.hostname,
+                    port: 443,
+                    path: parsedUrl.path,
+                    method: "PUT",
+                    headers: {
+                        "content-type": "",
+                        "content-length": responseBody.length
+                    }
+                };
+
+                let request = https.request(options, function(response) {
+                    console.log(`CFN Response: ${response.statusCode} ${response.statusMessage}`);
+                    resolve(context.done());
+                });
+
+                request.on("error", function(error) {
+                    console.log("send(..) failed executing https.request(..): " + error);
+                    reject(context.done(error));
+                });
+
+                request.write(responseBody);
+                request.end();
+            })
+          }
+
+
+#     ____ _
+#    / ___| |_   _  ___
+#   | |  _| | | | |/ _ \
+#   | |_| | | |_| |  __/
+#    \____|_|\__,_|\___|
+#
+  GlueDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: dcp
+        Description: 'Data Classification Pipeline'
+
+  GlueInputTableCrawler:
+    Type: AWS::Glue::Crawler
+    Properties:
+      Role: !GetAtt GlueJobRole.Arn
+      Description: Data Classification Pipeline Input Table Crawler
+      DatabaseName: !Ref GlueDatabase
+      Targets:
+        S3Targets:
+          - Path: !Ref GlueBucket
+      Name: dcp-glue-crawler
+      SchemaChangePolicy:
+        UpdateBehavior: "UPDATE_IN_DATABASE"
+        DeleteBehavior: "DEPRECATE_IN_DATABASE"
+      Configuration: "{\"Version\":1.0,\"Grouping\":{\"TableGroupingPolicy\":\"CombineCompatibleSchemas\"},\"CrawlerOutput\":{\"Partitions\":{\"AddOrUpdateBehavior\":\"InheritFromTable\"},\"Tables\":{\"AddOrUpdateBehavior\":\"MergeNewColumns\"}}}"
+
+  GlueOutputTableCrawler:
+    Type: AWS::Glue::Crawler
+    Properties:
+      Role: !GetAtt GlueJobRole.Arn
+      Description: Data Classification Pipeline Output Table Crawler
+      SchemaChangePolicy: ''
+      DatabaseName: !Ref GlueDatabase
+      Targets:
+        S3Targets:
+          - Path: !Ref AthenaBucket
+      TablePrefix: ''
+      Name: dcp-athena-crawler
+      SchemaChangePolicy:
+        UpdateBehavior: "UPDATE_IN_DATABASE"
+        DeleteBehavior: "LOG"
+      Configuration: "{\"Version\":1.0,\"Grouping\":{\"TableGroupingPolicy\":\"CombineCompatibleSchemas\"},\"CrawlerOutput\":{\"Partitions\":{\"AddOrUpdateBehavior\":\"InheritFromTable\"},\"Tables\":{\"AddOrUpdateBehavior\":\"MergeNewColumns\"}}}"
+
+  GlueJob:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: 'dcp-etl-job'
+      Description: 'Data Classification Pipeline ETL Job'
+      Role: !GetAtt GlueJobRole.Arn
+      Command:
+        Name: glueetl
+        PythonVersion: 3
+        ScriptLocation: !Sub 's3://${AssetsBucket}/scripts/dcp-script.py'
+      DefaultArguments:
+        "--TempDir": !Sub "s3://${AssetsBucket}/temporary/"
+        "--class": "GlueApp"
+        "--enable-continuous-cloudwatch-log": "true"
+        "--enable-metrics": "true"
+        "--enable-spark-ui": "true"
+        "--job-bookmark-option": "job-bookmark-enable"
+        "--job-language": "python"
+        "--spark-event-logs-path": !Sub "s3://${AssetsBucket}/sparkHistoryLogs/"
+      WorkerType: 'G.1X'
+      NumberOfWorkers: 2
+      MaxRetries: 0
+      GlueVersion: '2.0'
+    DependsOn: CreateGlueScriptCustomResource
+
+  GlueWorkflow:
+    Type: AWS::Glue::Workflow
+    Properties:
+      Description: 'Data Classification Pipeline Workflow'
+      Name: 'dcp-workflow'
+
+  GlueWFStartTrigger:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Description: 'Start Trigger'
+      Name: start-workflow
+      Type: ON_DEMAND
+      Actions:
+        - CrawlerName: !Ref GlueInputTableCrawler
+      WorkflowName: !Ref GlueWorkflow
+    DependsOn: GlueInputTableCrawler
+
+  GlueWFPostInputCrawlerTrigger:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Name: 'Post Input Crawler Success Condition'
+      Type: "CONDITIONAL"
+      StartOnCreation: true
+      Actions:
+        - JobName: !Ref GlueJob
+      Predicate:
+        Conditions:
+         - LogicalOperator: EQUALS
+           CrawlerName: !Ref GlueInputTableCrawler
+           CrawlState: SUCCEEDED
+        Logical: ANY
+      WorkflowName: !Ref GlueWorkflow
+    DependsOn: GlueJob
+
+  GlueWFPostETLJobTrigger:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Name: 'Post ETL Job Success Condition'
+      Type: "CONDITIONAL"
+      StartOnCreation: true
+      Actions:
+        - CrawlerName: !Ref GlueOutputTableCrawler
+      Predicate:
+        Conditions:
+          - LogicalOperator: EQUALS
+            JobName: !Ref GlueJob
+            State: 'SUCCEEDED'
+        Logical: 'ANY'
+      WorkflowName: !Ref GlueWorkflow
+    DependsOn: GlueOutputTableCrawler
+
+
+#   |_ _|  / \  |  \/  |
+#    | |  / _ \ | |\/| |
+#    | | / ___ \| |  | |
+#   |___/_/   \_\_|  |_|
+#
+  RDSServiceRole:
+    Type: "AWS::IAM::ServiceLinkedRole"
+    Condition: CreateRDSServiceRole
+    Properties:
+      AWSServiceName: "rds.amazonaws.com"
+      Description: Allows Amazon RDS to manage AWS resources on your behalf
+
+  DMSAccessRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      RoleName: 'dms-vpc-role'
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - "dms.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AmazonDMSVPCManagementRole'
+      Policies:
+        -
+          PolicyName: DMStoS3Policy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              -
+                Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt MacieBucket.Arn
+                  - !Sub "${MacieBucket.Arn}/*"
+
+  GlueJobRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: DataClassificationPipelineGlueJobRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Action: 'sts:AssumeRole'
+            Effect: 'Allow'
+            Principal:
+              Service: 'glue.amazonaws.com'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole'
+      Policies:
+        - PolicyName: S3ReadWriteAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 's3:ListBucket'
+                  - 's3:GetObject'
+                  - 's3:PutObject'
+                  - 's3:DeleteObject'
+                Resource:
+                  - !Sub ${GlueBucket.Arn}
+                  - !Sub ${AthenaBucket.Arn}
+                  - !Sub ${AssetsBucket.Arn}
+                  - !Sub ${GlueBucket.Arn}/*
+                  - !Sub ${AthenaBucket.Arn}/*
+                  - !Sub ${AssetsBucket.Arn}/*
+
+  StartGlueWorkflowLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: DataClassificationPipelineStartGlueWorkflowLambdaRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Action: 'sts:AssumeRole'
+            Effect: 'Allow'
+            Principal:
+              Service: 'lambda.amazonaws.com'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+      Policies:
+        - PolicyName: StartGlueWorkflow
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'glue:StartWorkflowRun'
+                Resource:
+                  - '*'
+
+  CreateGlueScriptLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: DataClassificationPipelineCreateGlueScriptLambdaRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Action: 'sts:AssumeRole'
+            Effect: 'Allow'
+            Principal:
+              Service: 'lambda.amazonaws.com'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+      Policies:
+        - PolicyName: S3PutObject
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 's3:PutObject'
+                Resource:
+                  - !Sub '${AssetsBucket.Arn}/*'
+
+  DeliveryRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: 'DataClassificationPipelineKinesisRole'
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: ''
+            Effect: Allow
+            Principal:
+              Service: firehose.amazonaws.com
+            Action: 'sts:AssumeRole'
+            Condition:
+              StringEquals:
+                'sts:ExternalId': !Ref 'AWS::AccountId'
+  DeliveryPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: firehose_delivery_policy
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - 's3:AbortMultipartUpload'
+              - 's3:GetBucketLocation'
+              - 's3:GetObject'
+              - 's3:ListBucket'
+              - 's3:ListBucketMultipartUploads'
+              - 's3:PutObject'
+            Resource:
+              - !Sub 'arn:aws:s3:::${GlueBucket}'
+              - !Sub 'arn:aws:s3:::${GlueBucket}/*'
+      Roles:
+        - !Ref DeliveryRole
+
+  EventDeliveryRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: 'DataClassificationPipelineCloudWatchRole'
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: 'sts:AssumeRole'
+
+  EventDeliveryPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: event_firehose_delivery_policy
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - 'firehose:PutRecord'
+              - 'firehose:PutRecordBatch'
+            Resource:
+              - !Sub 'arn:aws:firehose:${AWS::Region}:${AWS::AccountId}:deliverystream/${MacieFindingsDeliveryStream}'
+      Roles:
+        - !Ref EventDeliveryRole
+
+
+#    __  __            _
+#   |  \/  | __ _  ___(_) ___
+#   | |\/| |/ _` |/ __| |/ _ \
+#   | |  | | (_| | (__| |  __/
+#   |_|  |_|\__,_|\___|_|\___|
+#
+  MacieSession:
+    Type: AWS::Macie::Session
+    Properties:
+      Status: ENABLED
+
+
+#     ___        _               _
+#    / _ \ _   _| |_ _ __  _   _| |_ ___
+#   | | | | | | | __| '_ \| | | | __/ __|
+#   | |_| | |_| | |_| |_) | |_| | |_\__ \
+#    \___/ \__,_|\__| .__/ \__,_|\__|___/
+#                   |_|
+Outputs:
+  EndpointAddress:
+    Description: Address of the RDS endpoint.
+    Value: !GetAtt MySQLDB.Endpoint.Address
+
+  EndpointPort:
+    Description: Port of the RDS endpoint.
+    Value: !GetAtt MySQLDB.Endpoint.Port
