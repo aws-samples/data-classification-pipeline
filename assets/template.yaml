@@ -236,42 +236,6 @@ Resources:
 #   | . \| |  | |___) |
 #   |_|\_\_|  |_|____/
 #
-  # MacieCuratedKey:
-  #   Type: 'AWS::KMS::Key'
-  #   Properties:
-  #     Description: Key for Macie Curated bucket
-  #     KeyPolicy:
-  #       Version: 2012-10-17
-  #       Id: key-default-1
-  #       Statement:
-  #         - Sid: Enable IAM User Permissions
-  #           Effect: Allow
-  #           Principal:
-  #             AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
-  #           Action: 'kms:*'
-  #           Resource: '*'
-  #         - Sid: Allow Macie Principal to use the key
-  #           Effect: Allow
-  #           Principal:
-  #             Service: macie.amazonaws.com
-  #           Action:
-  #             - 'kms:Encrypt'
-  #             - 'kms:GenerateDataKey'
-  #           Resource: '*'
-  #         - Sid: Allow S3 Principal to use the key
-  #           Effect: Allow
-  #           Principal:
-  #             Service: s3.amazonaws.com
-  #           Action:
-  #             - 'kms:Decrypt'
-  #           Resource: '*'
-  #
-  # MacieCuratedKeyAlias:
-  #   Type: 'AWS::KMS::Alias'
-  #   Properties:
-  #     AliasName: !Sub 'alias/${AWS::StackName}-macie-curated-bucket-encryption-key'
-  #     TargetKeyId:
-  #       Ref: MacieCuratedKey
 
   ConfidentialKey:
     DependsOn: MacieSession
@@ -325,43 +289,6 @@ Resources:
           - ServerSideEncryptionByDefault:
               SSEAlgorithm: AES256
 
-  # MacieCuratedBucket:
-  #   DependsOn: MacieCuratedKey
-  #   Type: 'AWS::S3::Bucket'
-  #   Properties:
-  #     BucketName: !Sub '${Prefix}-macie-curated-${AWS::Region}-${AWS::AccountId}'
-  #     BucketEncryption:
-  #       ServerSideEncryptionConfiguration:
-  #         - ServerSideEncryptionByDefault:
-  #             SSEAlgorithm: 'aws:kms'
-  #             KMSMasterKeyID: !GetAtt MacieCuratedKey.Arn
-  #
-  # MacieCuratedBucketPolicy:
-  #   Type: 'AWS::S3::BucketPolicy'
-  #   Properties:
-  #     Bucket: !Ref MacieCuratedBucket
-  #     PolicyDocument:
-  #       Statement:
-  #         - Action:
-  #             - 's3:GetBucketLocation'
-  #           Effect: Allow
-  #           Principal:
-  #             Service: macie.amazonaws.com
-  #           Resource: !GetAtt MacieCuratedBucket.Arn
-  #         - Action:
-  #             - 's3:PutObject'
-  #           Effect: Allow
-  #           Principal:
-  #             Service: macie.amazonaws.com
-  #           Resource: !Sub '${MacieCuratedBucket.Arn}/*'
-  #         - Action:
-  #             - 's3:*'
-  #           Effect: Deny
-  #           Principal: '*'
-  #           Resource: !Sub '${MacieCuratedBucket.Arn}/*'
-  #           Condition:
-  #             Bool:
-  #               'aws:SecureTransport': 'false'
 
   GlueBucket:
     Type: AWS::S3::Bucket
