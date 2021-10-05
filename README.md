@@ -7,7 +7,7 @@ Today it's only possible to run Amazon Macie Jobs against S3 buckets, so this so
 
 ![solution](images/Enabling-data-classification-Amazon-RDS-Amazon-Macie-1.png)
 
-## Steps
+## Deployment
 Please refer to this [blog post](https://aws.amazon.com/blogs/security/enabling-data-classification-for-amazon-rds-database-with-amazon-macie/) for the detailed instructions on how to use the solution.
 
 ## Clean up
