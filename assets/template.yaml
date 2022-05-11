@@ -469,6 +469,7 @@ Resources:
     DependsOn:
       - PublicSubnet0
       - PublicSubnet1
+      - DMSAccessRole
     Type: "AWS::DMS::ReplicationSubnetGroup"
     Properties:
       ReplicationSubnetGroupDescription: DMS Subnet Group
